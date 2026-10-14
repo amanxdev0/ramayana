@@ -42,3 +42,15 @@ python3 -m http.server 8000
 No build step, no dependencies. Enable GitHub Pages on this repo to take it live.
 
 Crafted by Aman Singh.
+
+## The Scroll Series
+
+Part of Aman Singh's scroll-driven cinematic universe — real HTML floating over live 3D films, where scroll is the playhead:
+
+- [SCROLLFILM](https://amanxdev0.github.io/scrollfilm-3d/) — the original cinematic WebGL film + full reverse-engineering breakdown
+- [HELIOS](https://amanxdev0.github.io/helios/) — scroll from the Milky Way to Pluto
+- [ABYSS](https://amanxdev0.github.io/abyss/) — descend through the five ocean zones to Challenger Deep
+- [EVENT HORIZON](https://amanxdev0.github.io/event-horizon/) — dive into the heart of a black hole
+- [RAMAYANA](https://amanxdev0.github.io/ramayana/) — a 3D flight through the Valmiki Ramayana
+
+Built with the [scrollfilm engine](https://github.com/amanxdev0/scrollfilm) — make your own.

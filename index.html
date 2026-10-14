@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAMAYANA — a scroll-driven epic</title>
+<meta name="description" content="RAMAYANA is a scroll-driven journey through the Valmiki Ramayana: all 7 Kandas, every great event, with Rama's age and the years of exile advancing as you scroll — all as real HTML over a living painted film.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Tiro+Devanagari+Sanskrit&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<canvas id="film" aria-hidden="true"></canvas>
+<div class="vignette" aria-hidden="true"></div>
+
+<header class="hud" aria-hidden="true">
+  <div class="hud-row">
+    <span class="hud-title">RAMAYANA</span>
+    <span class="hud-kanda" id="hudKanda">The Adi Kavya</span>
+    <span class="hud-age" id="hudAge">Rama · age 0</span>
+  </div>
+  <div class="hud-row sub">
+    <span class="hud-era" id="hudEra">The first poem · 24,000 verses</span>
+  </div>
+  <div class="hud-track"><div class="hud-bar" id="hudBar"></div></div>
+</header>
+
+<main id="content">
+
+  <section class="chapter hero" data-scene="intro" data-kanda="The Adi Kavya" data-age="0" data-era="The first poem · 24,000 verses · 7 Kandas">
+    <div class="chapter-inner">
+      <p class="shloka">॥ श्रीराम ॥</p>
+      <h1 class="mega">RAMAYANA</h1>
+      <p class="lede">The journey of Rama — prince, exile, warrior, king —<br>
+      told kanda by kanda, the way Valmiki sang it.<br>
+      Scroll, and walk beside him from birth to the very end.</p>
+      <p class="scroll-hint"><span class="scroll-hint-arrow">↓</span> scroll to begin the journey</p>
+    </div>
+  </section>
+
+  <section class="chapter" data-scene="bala" data-kanda="Bala Kanda" data-age="16" data-era="Book of Childhood · Rama's age 0–16">
+    <div class="chapter-inner">
+      <p class="kanda-no">Kanda I</p>
+      <p class="shloka">॥ कौसल्या सुप्रजा राम ॥</p>
+      <h2>Bala Kanda <span class="h2-sub">— the book of childhood</span></h2>
+      <ul class="events">
+        <li><strong>Ayodhya, on the Sarayu.</strong> King Dasharatha, childless, performs the <em>Putrakameshti</em> yajna. The queens partake of the divine payasa — and four sons are born: <strong>Rama</strong> to Kausalya, <strong>Bharata</strong> to Kaikeyi, <strong>Lakshmana</strong> and <strong>Shatrughna</strong> to Sumitra.</li>
+        <li><strong>At sixteen,</strong> the sage Vishvamitra arrives at court and asks for Rama. Father and son leave Ayodhya to guard the sage's sacrifice.</li>
+        <li><strong>Tataka is slain,</strong> and for six nights the brothers stand guard over Siddhashrama — not a single demon disturbs the rites.</li>
+        <li><strong>Ahalya is freed</strong> from her stone curse by the dust of Rama's feet at Gautama's ashram.</li>
+        <li><strong>Mithila.</strong> Before a hushed court, Rama lifts Shiva's mighty bow — and <strong>breaks it</strong>. Sita's swayamvara is won; the four brothers wed; even Parashurama's wrath is answered. They return to Ayodhya in glory.</li>
+      </ul>
+      <div class="cast">
+        <figure><img src="assets/characters/rama.webp" alt="Rama" loading="lazy"><figcaption>Rama</figcaption></figure>
+        <figure><img src="assets/characters/lakshmana.webp" alt="Lakshmana" loading="lazy"><figcaption>Lakshmana</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="chapter" data-scene="ayodhya" data-kanda="Ayodhya Kanda" data-age="25" data-era="Book of Ayodhya · Rama's age ~25 · the exile begins">
+    <div class="chapter-inner">
+      <p class="kanda-no">Kanda II</p>
+      <p class="shloka">॥ पितृवाक्यपरिपालनम् ॥</p>
+      <h2>Ayodhya Kanda <span class="h2-sub">— the book of Ayodhya</span></h2>
+      <ul class="events">
+        <li><strong>The coronation is announced.</strong> All Ayodhya rejoices — Rama will be crowned Yuvaraja at dawn.</li>
+        <li><strong>One night changes everything.</strong> Manthara poisons Queen Kaikeyi's heart; Kaikeyi claims two boons Dasharatha once granted her: <strong>Bharata shall be crowned, and Rama shall live fourteen years in the forest.</strong></li>
+        <li><strong>Rama accepts with a serene smile</strong> — a father's word is dharma itself. Neither Sita nor Lakshmana will stay behind; all three take up bark garments and leave.</li>
+        <li><strong>The farewell.</strong> At the Tamasa they send the chariot back; Guha, the Nishada chief, ferries them across the Ganga in the dark.</li>
+        <li><strong>Dasharatha dies of grief,</strong> crying Rama's name. Bharata returns from Kekaya, refuses the throne, and places <strong>Rama's padukas</strong> upon it — ruling from Nandigrama as a regent, not a king.</li>
+      </ul>
+      <div class="cast">
+        <figure><img src="assets/characters/rama.webp" alt="Rama" loading="lazy"><figcaption>Rama</figcaption></figure>
+        <figure><img src="assets/characters/sita.webp" alt="Sita" loading="lazy"><figcaption>Sita</figcaption></figure>
+        <figure><img src="assets/characters/lakshmana.webp" alt="Lakshmana" loading="lazy"><figcaption>Lakshmana</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="chapter" data-scene="aranya" data-kanda="Aranya Kanda" data-age="32" data-era="Book of the Forest · years 1–13 of exile">
+    <div class="chapter-inner">
+      <p class="kanda-no">Kanda III</p>
+      <p class="shloka">॥ दण्डकारण्यम् ॥</p>
+      <h2>Aranya Kanda <span class="h2-sub">— the book of the forest</span></h2>
+      <ul class="events">
+        <li><strong>Thirteen years among the sages</strong> of Dandakaranya. Viradha is slain; the sage Agastya gifts Rama divine celestial weapons.</li>
+        <li><strong>Panchavati, on the Godavari.</strong> Surpanakha's advances are spurned — and in fury her kin attack: <strong>Khara, Dushana, Trishira and fourteen thousand rakshasas fall to Rama alone</strong> in a single battle.</li>
+        <li><strong>Ravana plots revenge.</strong> The demon Maricha takes the form of a <strong>golden deer</strong>; enchanted, Sita begs Rama to catch it. As Rama chases it far, the dying Maricha cries in Rama's own voice — <em>"Ha Sita! Ha Lakshmana!"</em></li>
+        <li><strong>The abduction.</strong> Lakshmana is drawn away; Ravana seizes Sita into the Pushpaka Vimana. The vulture-king <strong>Jatayu fights the demon king in the sky</strong> and falls, mortally wounded — Rama performs his last rites with his own hands.</li>
+        <li><strong>The search begins.</strong> Kabandha is slain and freed from his curse; <strong>Shabari</strong> offers Rama ber she has tasted for sweetness — and he eats them with joy. At Pampa lake, a stranger approaches through the trees: <strong>Hanuman</strong>.</li>
+      </ul>
+      <div class="cast">
+        <figure><img src="assets/characters/sita.webp" alt="Sita" loading="lazy"><figcaption>Sita</figcaption></figure>
+        <figure><img src="assets/characters/hanuman.webp" alt="Hanuman" loading="lazy"><figcaption>Hanuman</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="chapter" data-scene="kishkindha" data-kanda="Kishkindha Kanda" data-age="38" data-era="Book of Kishkindha · year 13 of exile">
+    <div class="chapter-inner">
+      <p class="kanda-no">Kanda IV</p>
+      <p class="shloka">॥ सुग्रीवमैत्री ॥</p>
+      <h2>Kishkindha Kanda <span class="h2-sub">— the book of the vanaras</span></h2>
+      <ul class="events">
+        <li><strong>A friendship sworn before fire.</strong> Hanuman brings the exiles to Sugriva, the vanara prince in hiding. Rama and Sugriva clasp hands over sacred flame — each vows to restore the other's beloved.</li>
+        <li><strong>Vali falls to a single arrow</strong> loosed from behind the trees; Sugriva is crowned king of Kishkindha.</li>
+        <li><strong>The monsoon months pass</strong> on Prasravana hill. Then Tara's counsel stirs the king — and the search begins.</li>
+        <li><strong>Armies of vanaras pour out</strong> to the four quarters. Hanuman's party pushes south to the shore of the endless sea — where the ancient vulture <strong>Sampati</strong> reveals the truth: <em>Sita is in Lanka, across the ocean.</em></li>
+      </ul>
+      <div class="cast">
+        <figure><img src="assets/characters/hanuman.webp" alt="Hanuman" loading="lazy"><figcaption>Hanuman</figcaption></figure>
+        <figure><img src="assets/characters/rama.webp" alt="Rama" loading="lazy"><figcaption>Rama</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="chapter" data-scene="sundara" data-kanda="Sundara Kanda" data-age="38" data-era="The Beautiful Book · Hanuman's leap · year 13">
+    <div class="chapter-inner">
+      <p class="kanda-no">Kanda V</p>
+      <p class="shloka">॥ दृष्टा सीता ॥</p>
+      <h2>Sundara Kanda <span class="h2-sub">— the beautiful book</span></h2>
+      <ul class="events">
+        <li><strong>The leap.</strong> Hanuman grows mountain-tall and hurls himself across the sea — past Mainaka's hospitality, past Surasa's test, past Simhika's jaws — and lands in Lanka by night, small as a cat.</li>
+        <li><strong>In the Ashoka Vatika, he finds her.</strong> Sita — thin, steadfast, guarded by rakshasis — unbroken after months of captivity.</li>
+        <li><strong>At dawn Ravana himself comes to threaten her.</strong> Sita answers with a blade of grass between them: <em>my heart is Rama's alone.</em></li>
+        <li><strong>The meeting.</strong> Hanuman drops from the tree, gives her Rama's ring, and takes her chudamani jewel for Rama. Then — to measure Lanka's strength — <strong>he lets himself be captured</strong>.</li>
+        <li><strong>Lanka burns.</strong> His tail set ablaze, Hanuman breaks free and torches the golden city, then leaps home across the waves with three immortal words: <em><strong>"Drishta Sita!"</strong> — Sita has been seen!</em></li>
+      </ul>
+      <div class="cast">
+        <figure><img src="assets/characters/hanuman.webp" alt="Hanuman" loading="lazy"><figcaption>Hanuman</figcaption></figure>
+        <figure><img src="assets/characters/sita.webp" alt="Sita" loading="lazy"><figcaption>Sita</figcaption></figure>
+        <figure><img src="assets/characters/ravana.webp" alt="Ravana" loading="lazy"><figcaption>Ravana</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="chapter" data-scene="yuddha" data-kanda="Yuddha Kanda" data-age="39" data-era="Book of War · year 14 · the exile ends">
+    <div class="chapter-inner">
+      <p class="kanda-no">Kanda VI</p>
+      <p class="shloka">॥ विजयादशमी ॥</p>
+      <h2>Yuddha Kanda <span class="h2-sub">— the book of war</span></h2>
+      <ul class="events">
+        <li><strong>The march south.</strong> Vibhishana, Ravana's righteous brother, surrenders at Rama's feet and is sheltered. The ocean-god himself advises the impossible: <strong>build a bridge</strong>.</li>
+        <li><strong>In five days, Nala's vanara engineers raise the Rama Setu</strong> across the sea — stone upon stone, and the army crosses into Lanka.</li>
+        <li><strong>War engulfs the island.</strong> Angada's final embassy fails; the giant <strong>Kumbhakarna</strong> is awakened and falls; <strong>Meghnada (Indrajit)</strong> is slain by Lakshmana after his Nikumbhila sacrifice is broken.</li>
+        <li><strong>The final duel.</strong> Gods watch from the sky as Rama and Ravana clash — until, guided by Matali's counsel, Rama looses the Brahmastra. <strong>Ravana falls on Vijayadashami.</strong> Mandodari's lament echoes over Lanka.</li>
+        <li><strong>Fire cannot burn the pure.</strong> Sita walks through the flames of the Agni Pariksha and emerges unscathed; Brahma, Shiva and Dasharatha descend from the heavens in blessing.</li>
+        <li><strong>Home.</strong> In the Pushpaka Vimana they fly over the Setu; Bharata rushes to meet them at Nandigrama. <strong>The fourteen years are complete — Rama is crowned in Ayodhya, and Rama Rajya begins.</strong></li>
+      </ul>
+      <div class="cast">
+        <figure><img src="assets/characters/rama.webp" alt="Rama" loading="lazy"><figcaption>Rama</figcaption></figure>
+        <figure><img src="assets/characters/ravana.webp" alt="Ravana" loading="lazy"><figcaption>Ravana</figcaption></figure>
+        <figure><img src="assets/characters/lakshmana.webp" alt="Lakshmana" loading="lazy"><figcaption>Lakshmana</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="chapter" data-scene="uttara" data-kanda="Uttara Kanda" data-age="45" data-era="The Final Book · the years after">
+    <div class="chapter-inner">
+      <p class="kanda-no">Kanda VII</p>
+      <p class="shloka">॥ रामो राजमणिः सदा विजयते ॥</p>
+      <h2>Uttara Kanda <span class="h2-sub">— the final book</span></h2>
+      <ul class="events">
+        <li><strong>Rama Rajya.</strong> Rama rules Ayodhya in perfect dharma — an age remembered as the ideal of kingship, where none grieve and dharma walks the earth.</li>
+        <li><strong>The king's hardest dharma.</strong> A washerman's taunt sows doubt among the people about Sita's captivity. Bound by a king's duty to his subjects, Rama — heartbroken — sends the pregnant Sita to <strong>Valmiki's ashram</strong>.</li>
+        <li><strong>In the forest ashram, Lava and Kusha are born</strong> — and raised on the very poem of their father's life, taught by Valmiki himself.</li>
+        <li><strong>The Ashvamedha yajna.</strong> Two young boys sing the Ramayana before Rama and the entire court — and the king finally understands who they are.</li>
+        <li><strong>The earth receives her daughter.</strong> Summoned to return, Sita calls upon Bhudevi, her mother the Earth — the ground opens in light, and <strong>Sita descends into it</strong>, lost to mortal eyes.</li>
+        <li><strong>The end of the avatara.</strong> Lakshmana departs first; then Rama crowns his sons, walks into the <strong>Sarayu river</strong>, and the earthly journey of Vishnu's seventh descent comes to its close.</li>
+      </ul>
+      <div class="cast">
+        <figure><img src="assets/characters/rama.webp" alt="Rama" loading="lazy"><figcaption>Rama</figcaption></figure>
+        <figure><img src="assets/characters/sita.webp" alt="Sita" loading="lazy"><figcaption>Sita</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="chapter roster" data-scene="uttara" data-kanda="The Immortals" data-age="45" data-era="The ones the story is made of">
+    <div class="chapter-inner">
+      <p class="kanda-no">Dramatis personae</p>
+      <h2>The Immortals</h2>
+      <p class="lede">Five souls around whom the epic turns.</p>
+      <div class="roster-grid">
+        <figure class="roster-card">
+          <img src="assets/characters/rama.webp" alt="Rama" loading="lazy">
+          <figcaption><strong>Rama</strong><span>Maryada Purushottam — the ideal man; seventh avatara of Vishnu</span></figcaption>
+        </figure>
+        <figure class="roster-card">
+          <img src="assets/characters/sita.webp" alt="Sita" loading="lazy">
+          <figcaption><strong>Sita</strong><span>Daughter of the Earth; the unshakable heart of the epic</span></figcaption>
+        </figure>
+        <figure class="roster-card">
+          <img src="assets/characters/lakshmana.webp" alt="Lakshmana" loading="lazy">
+          <figcaption><strong>Lakshmana</strong><span>The devoted brother who renounced sleep for fourteen years</span></figcaption>
+        </figure>
+        <figure class="roster-card">
+          <img src="assets/characters/hanuman.webp" alt="Hanuman" loading="lazy">
+          <figcaption><strong>Hanuman</strong><span>The leaping devotee; strength in service of love</span></figcaption>
+        </figure>
+        <figure class="roster-card">
+          <img src="assets/characters/ravana.webp" alt="Ravana" loading="lazy">
+          <figcaption><strong>Ravana</strong><span>Ten-headed king of Lanka; scholar, warrior — undone by desire</span></figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="chapter hero" data-scene="outro" data-kanda="Dharmo Rakshati Rakshitah" data-age="45" data-era="Dharma protects those who protect it">
+    <div class="chapter-inner">
+      <p class="shloka">॥ धर्मो रक्षति रक्षितः ॥</p>
+      <h2 class="mega-sm">The epic never ends.</h2>
+      <p class="lede">For as long as mountains stand and rivers flow,<br>
+      so long will the Ramayana be told —<br>
+      in every telling, Rama walks the earth again.</p>
+      <p class="credit">Crafted by Aman Singh · based on the Valmiki Ramayana<br>
+      <span class="credit-dim">Ages follow the traditional telling and vary across retellings.</span></p>
+    </div>
+  </section>
+
+</main>
+
+<script src="js/ramayana.js"></script>
+</body>
+</html>

@@ -26,7 +26,7 @@ Ages follow the traditional telling and vary across retellings.
 ## Characters
 
 Original 16-bit pixel-art portraits — Rama, Sita, Lakshmana, Hanuman and
-Ravana — created for this project (`assets/characters/`).
+Ravana — created for this project and embedded in the page (`assets/img1.js`, `img2.js`, `img3.js` as base64; originals under `assets/characters/`).
 
 ## Run it
 

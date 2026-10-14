@@ -9,6 +9,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Tiro+Devanagari+Sanskrit&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
 </head>
 <body>
 
@@ -230,6 +233,9 @@ document.querySelectorAll('img[data-char]').forEach(function(i){
   if (b) i.src = 'data:image/webp;base64,' + b;
 });
 </script>
-<script src="js/ramayana.js"></script>
+<div id="nogl" hidden>
+  <p>This epic needs WebGL — please open it in a browser with WebGL enabled.</p>
+</div>
+<script type="module" src="js/ramayana.js"></script>
 </body>
 </html>

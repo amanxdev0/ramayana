@@ -1,18 +1,25 @@
-/* RAMAYANA — living painted film.
-   A 2D canvas film: each Kanda gets a hand-painted animated scene
-   (gradient skies, silhouettes, particles), crossfading as you scroll.
-   Chapters drive the HUD: Kanda name, Rama's age, era, progress. */
-(() => {
-'use strict';
+/* RAMAYANA — the Yatra. A scroll-driven 3D flight through the epic.
+ * Nine dioramas (intro + 7 Kandas + finale), one per chapter of the story.
+ * The camera flies from diorama to diorama as you scroll; the HUD tracks
+ * Rama's age and the era. Same butter-smooth playhead engine as HELIOS.
+ */
+import * as THREE from 'three';
 
 const canvas = document.getElementById('film');
-const ctx = canvas.getContext('2d');
-const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const hudKanda = document.getElementById('hudKanda');
+const hudAge = document.getElementById('hudAge');
+const hudEra = document.getElementById('hudEra');
+const hudBar = document.getElementById('hudBar');
 
-/* ---------------- utils ---------------- */
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const isCoarse = matchMedia('(pointer: coarse)').matches;
+
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const sstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
 const lerp = (a, b, t) => a + (b - a) * t;
+const rnd = (a, b) => a + Math.random() * (b - a);
 
+/* Seeded random for stable dioramas */
 function mulberry32(seed) {
   let s = seed >>> 0;
   return () => {
@@ -23,564 +30,655 @@ function mulberry32(seed) {
   };
 }
 
-function vgrad(stops) {
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  for (const [o, c] of stops) g.addColorStop(o, c);
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+} catch (e) {
+  document.getElementById('nogl').hidden = false;
+  document.querySelectorAll('.chapter').forEach((el) => el.classList.add('is-active'));
+  throw e;
+}
+
+const PR_CAP = isCoarse ? 1.5 : 2;
+let pixelRatio = Math.min(devicePixelRatio || 1, PR_CAP);
+renderer.setPixelRatio(pixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x04060f);
+scene.fog = new THREE.Fog(0x04060f, 60, 260);
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 1200);
+
+/* ---------------- procedural textures ---------------- */
+function canvasTex(w, h, painter) {
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  painter(cv.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const glowTex = canvasTex(128, 128, (g) => {
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.35, 'rgba(255,255,255,0.45)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+});
+
+/* Character sprites from the embedded pixel art (assets/img*.js) */
+const charTex = {};
+function loadCharacters() {
+  const src = window.RAM_IMAGES || {};
+  const loader = new THREE.TextureLoader();
+  for (const key of Object.keys(src)) {
+    const tex = loader.load('data:image/webp;base64,' + src[key]);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    charTex[key] = tex;
+  }
+}
+
+/* ---------------- build helpers ---------------- */
+const MAT = (c, o = {}) => new THREE.MeshBasicMaterial({ color: c, ...o });
+function box(w, h, d, c, x, y, z, o) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), MAT(c, o));
+  m.position.set(x, y, z);
+  return m;
+}
+function cyl(rt, rb, h, c, x, y, z, seg = 10, o) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), MAT(c, o));
+  m.position.set(x, y, z);
+  return m;
+}
+function cone(r, h, c, x, y, z, seg = 8, o) {
+  const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, seg), MAT(c, o));
+  m.position.set(x, y, z);
+  return m;
+}
+function ball(r, c, x, y, z, o) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 20), MAT(c, o));
+  m.position.set(x, y, z);
+  return m;
+}
+function glowSprite(color, s, x, y, z, opacity = 0.9) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTex, color, transparent: true, opacity,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  sp.scale.set(s, s, 1);
+  sp.position.set(x, y, z);
+  return sp;
+}
+/* Points cloud with per-point velocity; animate via driftPoints() */
+function makePoints(n, color, size, area, seed, opacity = 0.8) {
+  const r = mulberry32(seed);
+  const pos = new Float32Array(n * 3), vel = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    pos[i * 3] = (r() - 0.5) * area[0];
+    pos[i * 3 + 1] = r() * area[1];
+    pos[i * 3 + 2] = (r() - 0.5) * area[2];
+    vel[i * 3] = (r() - 0.5) * 1.2;
+    vel[i * 3 + 1] = r() * 2.2;
+    vel[i * 3 + 2] = (r() - 0.5) * 1.2;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const m = new THREE.PointsMaterial({
+    color, size, transparent: true, opacity,
+    map: glowTex,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+    alphaTest: 0.01,
+  });
+  const pts = new THREE.Points(g, m);
+  pts.userData = { vel, area, base: pos.slice() };
+  return pts;
+}
+function driftPoints(pts, t, dt, mode) {
+  const p = pts.geometry.attributes.position.array;
+  const { vel, area, base } = pts.userData;
+  const n = p.length / 3;
+  for (let i = 0; i < n; i++) {
+    if (mode === 'rise') {
+      p[i * 3 + 1] += vel[i * 3 + 1] * dt * 3;
+      p[i * 3] = base[i * 3] + Math.sin(t * 1.5 + i) * 2;
+      if (p[i * 3 + 1] > area[1]) p[i * 3 + 1] = 0;
+    } else if (mode === 'fall') {
+      p[i * 3 + 1] -= vel[i * 3 + 1] * dt * 2;
+      p[i * 3] = base[i * 3] + Math.sin(t + i * 1.7) * 3;
+      if (p[i * 3 + 1] < 0) p[i * 3 + 1] = area[1];
+    } else { // float
+      p[i * 3] = base[i * 3] + Math.sin(t * 0.7 + i * 2.1) * 3;
+      p[i * 3 + 1] = base[i * 3 + 1] + Math.sin(t * 0.9 + i) * 2;
+    }
+  }
+  pts.geometry.attributes.position.needsUpdate = true;
+}
+/* A palace silhouette: blocks, domes, spires */
+function palaceGroup(s, color, seed) {
+  const g = new THREE.Group();
+  const r = mulberry32(seed);
+  g.add(box(26 * s, 8 * s, 10 * s, color, 0, 4 * s, 0));
+  g.add(box(16 * s, 6 * s, 8 * s, color, 0, 11 * s, 0));
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(4 * s, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), MAT(color));
+  dome.position.set(0, 14 * s, 0);
+  g.add(dome);
+  g.add(cyl(0.3 * s, 0.3 * s, 4 * s, color, 0, 19 * s, 0));
+  for (const sx of [-1, 1]) {
+    const d2 = new THREE.Mesh(new THREE.SphereGeometry(2.6 * s, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), MAT(color));
+    d2.position.set(sx * 10 * s, 8 * s, 0);
+    g.add(d2);
+    g.add(cone(1.4 * s, 7 * s, color, sx * 15 * s, 11 * s, 0, 6));
+  }
+  for (let i = 0; i < 5; i++) {
+    const wx = -9 * s + i * 4.5 * s;
+    g.add(glowSprite(0xffca7a, 1.6 * s, wx, 5 * s, 5.2 * s, 0.85));
+  }
   return g;
 }
-
-/* ---------------- canvas sizing ---------------- */
-let W = 0, H = 0, DPR = 1;
-function resize() {
-  DPR = Math.min(devicePixelRatio || 1, 1.75);
-  W = innerWidth; H = innerHeight;
-  canvas.width = Math.round(W * DPR);
-  canvas.height = Math.round(H * DPR);
-  canvas.style.width = W + 'px';
-  canvas.style.height = H + 'px';
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-}
-addEventListener('resize', resize);
-resize();
-
-/* ---------------- paint helpers ---------------- */
-function stars(seed, n, t, maxA = 0.9) {
+function treeGroup(x, z, s, leaf, trunk, seed) {
   const r = mulberry32(seed);
-  ctx.save();
-  for (let i = 0; i < n; i++) {
-    const x = r() * W, y = r() * H * 0.62, s = r() * 1.6 + 0.4;
-    const tw = reduced ? 1 : 0.55 + 0.45 * Math.sin(t * (1 + r() * 2) + r() * 9);
-    ctx.globalAlpha = maxA * tw * (1 - y / (H * 0.7));
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(x, y, s, s);
+  const g = new THREE.Group();
+  g.add(cyl(0.5 * s, 0.8 * s, 5 * s, trunk, 0, 2.5 * s, 0));
+  for (let i = 0; i < 3; i++) {
+    const b = ball((3.2 - i * 0.7) * s, leaf, (r() - 0.5) * 2 * s, (6 + i * 2.2) * s, (r() - 0.5) * 2 * s);
+    g.add(b);
   }
-  ctx.restore();
+  g.position.set(x, 0, z);
+  return g;
+}
+/* Character billboard */
+const charSprites = [];
+function charSprite(key, x, y, z, s = 13) {
+  if (!charTex[key]) return new THREE.Group();
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: charTex[key], transparent: true, depthWrite: false }));
+  sp.scale.set(s, s, 1);
+  sp.position.set(x, y, z);
+  sp.userData.baseY = y;
+  sp.userData.ph = Math.random() * 9;
+  charSprites.push(sp);
+  return sp;
 }
 
-function moon(x, y, r) {
-  const g = ctx.createRadialGradient(x, y, r * 0.2, x, y, r * 3);
-  g.addColorStop(0, 'rgba(240,238,220,0.9)');
-  g.addColorStop(0.25, 'rgba(240,238,220,0.28)');
-  g.addColorStop(1, 'rgba(240,238,220,0)');
-  ctx.fillStyle = g;
-  ctx.beginPath(); ctx.arc(x, y, r * 3, 0, 7); ctx.fill();
-  ctx.fillStyle = '#f2eeda';
-  ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
-  ctx.fillStyle = 'rgba(190,188,170,0.5)';
-  ctx.beginPath(); ctx.arc(x - r * 0.3, y - r * 0.2, r * 0.22, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(x + r * 0.25, y + r * 0.3, r * 0.15, 0, 7); ctx.fill();
+/* ---------------- the nine dioramas ----------------
+   Diorama i sits at z = -i * DZ. The camera flies down -Z. */
+loadCharacters();
+const DZ = 150;
+const dioramas = [];
+const animated = []; // {update(t, dt)}
+
+function groundDisc(color, r = 70) {
+  const m = new THREE.Mesh(new THREE.CircleGeometry(r, 40), MAT(color));
+  m.rotation.x = -Math.PI / 2;
+  return m;
 }
 
-function sun(x, y, r, core, glow) {
-  const g = ctx.createRadialGradient(x, y, r * 0.1, x, y, r * 3.2);
-  g.addColorStop(0, core);
-  g.addColorStop(0.3, glow);
-  g.addColorStop(1, 'rgba(255,150,50,0)');
-  ctx.fillStyle = g;
-  ctx.beginPath(); ctx.arc(x, y, r * 3.2, 0, 7); ctx.fill();
-  ctx.fillStyle = core;
-  ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+/* 0 — INTRO: moonlit Ayodhya */
+{
+  const g = new THREE.Group();
+  const stars = makePoints(500, 0xbfd0ff, 1.6, [400, 160, 60], 11, 0.85);
+  stars.position.set(0, 40, -60);
+  g.add(stars);
+  animated.push({ pts: stars, mode: 'float' });
+  g.add(glowSprite(0xf2eeda, 60, 40, 80, -108, 0.95));
+  g.add(ball(9, 0xf2eeda, 40, 80, -108));
+  const pal = palaceGroup(1.6, 0x1a2242, 12);
+  pal.position.set(0, 0, -20);
+  g.add(pal);
+  const river = new THREE.Mesh(new THREE.PlaneGeometry(400, 26), MAT(0x16294f, { transparent: true, opacity: 0.9 }));
+  river.rotation.x = -Math.PI / 2;
+  river.position.set(0, 0.2, 26);
+  g.add(river);
+  const flies = makePoints(70, 0xffe9a0, 1.5, [120, 26, 80], 13, 0.9);
+  g.add(flies);
+  animated.push({ pts: flies, mode: 'float' });
+  g.add(groundDisc(0x070b18));
+  dioramas.push(g);
 }
 
-function ridge(baseY, color, seed, jag = 0.35, minH = 60, maxH = 260) {
-  const r = mulberry32(seed);
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(0, H);
-  ctx.lineTo(0, baseY);
-  let x = 0;
-  while (x < W) {
-    const w = 60 + r() * 160;
-    const h = minH + r() * (maxH - minH);
-    ctx.lineTo(x + w * 0.5, baseY - h * (0.6 + r() * jag));
-    ctx.lineTo(x + w, baseY - h * 0.25 * r());
-    x += w;
+/* 1 — BALA: dawn of childhood, the yajna fire */
+{
+  const g = new THREE.Group();
+  g.add(glowSprite(0xffb14e, 120, 0, 54, -108, 0.9));
+  g.add(ball(13, 0xfff3c8, 0, 54, -108));
+  const pal = palaceGroup(1.4, 0x3a1c3a, 21);
+  pal.position.set(-24, 0, -16);
+  g.add(pal);
+  // yajna altar with flame
+  g.add(box(6, 2, 6, 0x4a2c1a, 22, 1, 6));
+  const flame = cone(2.2, 7, 0xff9a2a, 22, 6, 6, 8);
+  g.add(flame);
+  g.add(glowSprite(0xffb14e, 22, 22, 7, 6, 0.8));
+  animated.push({ flame });
+  const embers = makePoints(80, 0xffb060, 1.6, [60, 40, 40], 22, 0.9);
+  embers.position.set(22, 4, 6);
+  g.add(embers);
+  animated.push({ pts: embers, mode: 'rise' });
+  const r = mulberry32(23);
+  for (let i = 0; i < 14; i++) g.add(treeGroup(-55 + r() * 110, -34 - r() * 20, 0.9 + r() * 0.7, 0x2a4a2a, 0x3a2a1a, 100 + i));
+  g.add(charSprite('rama', -8, 8, 14, 13));
+  g.add(charSprite('lakshmana', 8, 7, 16, 11));
+  g.add(groundDisc(0x2a1a20));
+  dioramas.push(g);
+}
+
+/* 2 — AYODHYA: the dusk of exile */
+{
+  const g = new THREE.Group();
+  g.add(glowSprite(0xff8c42, 90, 34, 52, -108, 0.85));
+  g.add(ball(10, 0xffd9a0, 34, 52, -108));
+  const pal = palaceGroup(1.7, 0x160f2e, 31);
+  pal.position.set(0, 0, -18);
+  g.add(pal);
+  // rows of lamps along the front
+  for (let i = 0; i < 12; i++) {
+    g.add(glowSprite(0xffca7a, 2.2, -30 + i * 5.5, 3.2, 2, 0.9));
   }
-  ctx.lineTo(W, H);
-  ctx.closePath();
-  ctx.fill();
+  const river = new THREE.Mesh(new THREE.PlaneGeometry(400, 30), MAT(0x3a1c40, { transparent: true, opacity: 0.9 }));
+  river.rotation.x = -Math.PI / 2;
+  river.position.set(0, 0.2, 30);
+  g.add(river);
+  const diyas = makePoints(26, 0xffca7a, 2, [140, 3, 24], 32, 0.95);
+  diyas.position.set(0, 1.4, 30);
+  g.add(diyas);
+  animated.push({ pts: diyas, mode: 'float' });
+  g.add(charSprite('rama', -10, 8, 14, 13));
+  g.add(charSprite('sita', 0, 7.5, 16, 12));
+  g.add(charSprite('lakshmana', 10, 7, 15, 11));
+  g.add(groundDisc(0x140d24));
+  dioramas.push(g);
 }
 
-function pines(baseY, color, seed, n, hMin, hMax) {
-  const r = mulberry32(seed);
-  ctx.fillStyle = color;
-  for (let i = 0; i < n; i++) {
-    const x = r() * W, h = hMin + r() * (hMax - hMin), w = h * 0.28;
-    ctx.fillRect(x - w * 0.08, baseY - h * 0.35, w * 0.16, h * 0.35); // trunk
-    for (let k = 0; k < 4; k++) {
-      const ty = baseY - h * 0.3 - (h * 0.7 * k) / 3;
-      const tw = w * (1 - k * 0.2);
-      ctx.beginPath();
-      ctx.moveTo(x - tw, ty); ctx.lineTo(x + tw, ty); ctx.lineTo(x, ty - h * 0.28);
-      ctx.closePath(); ctx.fill();
-    }
+/* 3 — ARANYA: the deep forest */
+{
+  const g = new THREE.Group();
+  const r = mulberry32(41);
+  for (let i = 0; i < 34; i++) {
+    g.add(treeGroup(-60 + r() * 120, -50 + r() * 70, 1.1 + r() * 1.1, 0x0e3a22, 0x2a1c10, 200 + i));
   }
-}
-
-function canopyTrees(baseY, color, seed, n, hMin, hMax) {
-  const r = mulberry32(seed);
-  ctx.fillStyle = color;
-  for (let i = 0; i < n; i++) {
-    const x = r() * W, h = hMin + r() * (hMax - hMin);
-    ctx.fillRect(x - h * 0.03, baseY - h * 0.5, h * 0.06, h * 0.5);
-    const blobs = 3 + Math.floor(r() * 3);
-    for (let b = 0; b < blobs; b++) {
-      const bx = x + (r() - 0.5) * h * 0.5;
-      const by = baseY - h * 0.55 - r() * h * 0.35;
-      const br = h * (0.14 + r() * 0.14);
-      ctx.beginPath(); ctx.arc(bx, by, br, 0, 7); ctx.fill();
-    }
-  }
-}
-
-function palace(x, baseY, s, color) {
-  ctx.fillStyle = color;
-  const w = 300 * s;
-  ctx.fillRect(x - w / 2, baseY - 90 * s, w, 90 * s);           // main block
-  ctx.fillRect(x - w * 0.32, baseY - 150 * s, w * 0.64, 60 * s); // upper block
-  // central dome
-  ctx.beginPath(); ctx.arc(x, baseY - 150 * s, 46 * s, Math.PI, 0); ctx.fill();
-  ctx.fillRect(x - 3 * s, baseY - 230 * s, 6 * s, 40 * s);        // finial
-  // side domes
-  for (const sx of [-1, 1]) {
-    ctx.beginPath(); ctx.arc(x + sx * w * 0.38, baseY - 90 * s, 30 * s, Math.PI, 0); ctx.fill();
-    ctx.fillRect(x + sx * w * 0.38 - 2 * s, baseY - 150 * s, 4 * s, 32 * s);
-    // spire
-    ctx.beginPath();
-    ctx.moveTo(x + sx * w * 0.52 - 8 * s, baseY - 90 * s);
-    ctx.lineTo(x + sx * w * 0.52 + 8 * s, baseY - 90 * s);
-    ctx.lineTo(x + sx * w * 0.52, baseY - 190 * s);
-    ctx.closePath(); ctx.fill();
-  }
-}
-
-function lankaTowers(x, baseY, s, color, seed) {
-  const r = mulberry32(seed);
-  ctx.fillStyle = color;
-  for (let i = 0; i < 7; i++) {
-    const tx = x + (r() - 0.5) * 560 * s;
-    const th = (120 + r() * 160) * s, tw = (26 + r() * 22) * s;
-    ctx.fillRect(tx - tw / 2, baseY - th, tw, th);
-    ctx.beginPath(); ctx.arc(tx, baseY - th, tw * 0.7, Math.PI, 0); ctx.fill();
-    ctx.fillRect(tx - 2 * s, baseY - th - 46 * s, 4 * s, 26 * s);
-  }
-}
-
-function sea(y, cTop, cBot, t, amp = 7) {
-  const g = ctx.createLinearGradient(0, y - 30, 0, H);
-  g.addColorStop(0, cTop); g.addColorStop(1, cBot);
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.moveTo(0, H); ctx.lineTo(0, y);
-  const tt = reduced ? 0 : t;
-  for (let x = 0; x <= W; x += 24) {
-    ctx.lineTo(x, y + Math.sin(x * 0.02 + tt * 1.4) * amp + Math.sin(x * 0.05 - tt) * amp * 0.4);
-  }
-  ctx.lineTo(W, H);
-  ctx.closePath(); ctx.fill();
-}
-
-function birds(n, t, color, seed, yBand = [0.12, 0.4]) {
-  const r = mulberry32(seed);
-  ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
-  for (let i = 0; i < n; i++) {
-    const bx = (r() * 1.4 - 0.2 + (reduced ? 0 : t * 0.008 * (0.5 + r()))) % 1.2;
-    const x = bx * W, y = H * (yBand[0] + r() * (yBand[1] - yBand[0]));
-    const s = 6 + r() * 8, f = reduced ? 0 : Math.sin(t * 6 + r() * 9) * 3;
-    ctx.beginPath();
-    ctx.moveTo(x - s, y + f); ctx.quadraticCurveTo(x, y - 4 - f, x, y);
-    ctx.quadraticCurveTo(x, y - 4 - f, x + s, y + f);
-    ctx.stroke();
-  }
-}
-
-/* ---------------- particles ---------------- */
-function makeParticles(n, seed, init) {
-  const r = mulberry32(seed);
-  const arr = [];
-  for (let i = 0; i < n; i++) arr.push(init(r, i));
-  return arr;
-}
-function drawDots(arr, color, size, glow = 0) {
-  ctx.save();
-  if (glow) { ctx.shadowColor = color; ctx.shadowBlur = glow; }
-  ctx.fillStyle = color;
-  for (const p of arr) {
-    ctx.globalAlpha = p.a;
-    ctx.beginPath(); ctx.arc(p.x, p.y, p.s * size, 0, 7); ctx.fill();
-  }
-  ctx.restore();
-}
-const drift = (arr, t, fn) => { if (!reduced) for (const p of arr) fn(p, t); };
-/* ---------------- scenes ----------------
-   Each painter: (p, t) — p = progress inside the scene's chapter (0..1),
-   t = seconds. Painted fresh every frame. */
-const scenes = {};
-
-const fireflies = makeParticles(70, 11, (r) => ({
-  x: r() * 2000, y: 0, s: 0.8 + r() * 1.8, a: 0.4 + r() * 0.6,
-  ph: r() * 9, sp: 0.3 + r() * 0.7, base: 0.35 + r() * 0.55,
-}));
-const embers = makeParticles(90, 22, (r) => ({
-  x: r() * 2000, y: r() * 1200, s: 0.8 + r() * 2.2, a: 0.5 + r() * 0.5,
-  vy: 20 + r() * 60, sway: r() * 9, base: r(),
-}));
-const petals = makeParticles(60, 33, (r) => ({
-  x: r() * 2000, y: r() * 1200, s: 1.5 + r() * 2.5, a: 0.5 + r() * 0.5,
-  vy: 14 + r() * 30, sway: r() * 9, rot: r() * 9,
-}));
-const diyas = makeParticles(26, 44, (r) => ({
-  x: r() * 2000, y: 0, s: 2 + r() * 3, a: 0.7 + r() * 0.3,
-  ph: r() * 9, base: 0.55 + r() * 0.4,
-}));
-
-scenes.intro = (p, t) => {
-  ctx.fillStyle = vgrad([[0, '#04060f'], [0.55, '#0a1430'], [1, '#16294f']]);
-  ctx.fillRect(0, 0, W, H);
-  stars(7, 220, t);
-  moon(W * 0.78, H * 0.2, 46);
-  ridge(H * 0.86, '#0a1024', 101, 0.3, 40, 120);
-  palace(W * 0.5, H * 0.9, 1.15, '#060a18');
-  // river shimmer
-  ctx.fillStyle = 'rgba(120,150,220,0.10)';
-  ctx.fillRect(0, H * 0.9, W, H * 0.1);
-  drift(fireflies, t, (q) => {
-    q.x = (q.base * W * 1.2 + t * 12 * q.sp) % (W + 80) - 40;
-    q.y = H * (0.55 + 0.3 * Math.sin(t * q.sp + q.ph)) + Math.sin(t * 2 + q.ph) * 14;
-    q.a = 0.25 + 0.55 * Math.abs(Math.sin(t * 1.6 + q.ph));
-  });
-  drawDots(fireflies.map(q => ({ ...q, x: q.x % (W + 80) })), '#ffe9a0', 1.6, 8);
-};
-
-scenes.bala = (p, t) => {
-  ctx.fillStyle = vgrad([[0, '#2b1a4e'], [0.45, '#a34a3a'], [0.72, '#ff9a3c'], [1, '#ffd97a']]);
-  ctx.fillRect(0, 0, W, H);
-  sun(W * 0.5, lerp(H * 0.75, H * 0.42, p), 54, '#fff3c8', 'rgba(255,180,80,0.55)');
-  ridge(H * 0.8, 'rgba(90,40,60,0.85)', 202, 0.35, 50, 170);
-  palace(W * 0.32, H * 0.92, 1.3, 'rgba(40,16,40,0.95)');
-  pines(H * 0.97, 'rgba(30,20,35,0.9)', 203, 26, 60, 150);
-  birds(7, t, 'rgba(40,20,40,0.8)', 204);
-  // yajna flame glow on the horizon
-  const fg = ctx.createRadialGradient(W * 0.68, H * 0.88, 4, W * 0.68, H * 0.88, 190);
-  fg.addColorStop(0, 'rgba(255,200,90,0.75)');
-  fg.addColorStop(1, 'rgba(255,120,40,0)');
-  ctx.fillStyle = fg;
-  ctx.fillRect(W * 0.68 - 200, H * 0.88 - 200, 400, 220);
-  drift(embers, t, (q) => {
-    q.y -= q.vy * 0.016; q.x += Math.sin(t * 2 + q.sway) * 0.6;
-    if (q.y < H * 0.3) { q.y = H * 0.92; q.x = W * (0.55 + q.base * 0.3); }
-  });
-  drawDots(embers, '#ffcf7a', 1.4, 10);
-};
-
-scenes.ayodhya = (p, t) => {
-  ctx.fillStyle = vgrad([[0, '#160f33'], [0.5, '#5a2358'], [0.78, '#c8503f'], [1, '#ff8c42']]);
-  ctx.fillRect(0, 0, W, H);
-  sun(W * 0.72, H * (0.62 + p * 0.1), 40, '#ffd9a0', 'rgba(255,140,66,0.5)');
-  palace(W * 0.5, H * 0.88, 1.5, '#120a24');
-  // palace lamps
-  const r = mulberry32(305);
-  ctx.save(); ctx.shadowColor = '#ffca7a'; ctx.shadowBlur = 12;
-  ctx.fillStyle = '#ffd9a0';
-  for (let i = 0; i < 26; i++) {
-    const lx = W * 0.5 + (r() - 0.5) * 380, ly = H * 0.88 - r() * 130;
-    ctx.globalAlpha = 0.5 + 0.5 * Math.abs(Math.sin(t * 2 + i));
-    ctx.beginPath(); ctx.arc(lx, ly, 2.4, 0, 7); ctx.fill();
-  }
-  ctx.restore();
-  sea(H * 0.88, 'rgba(200,90,80,0.55)', 'rgba(20,8,30,0.95)', t, 5);
-  // floating diyas on the river
-  drift(diyas, t, (q) => {
-    q.x = (q.base * W * 1.2 + t * 8) % (W + 60) - 30;
-    q.y = H * (0.9 + 0.06 * Math.sin(t + q.ph));
-    q.a = 0.5 + 0.4 * Math.abs(Math.sin(t * 2.2 + q.ph));
-  });
-  drawDots(diyas, '#ffca7a', 1.5, 12);
-};
-
-scenes.aranya = (p, t) => {
-  ctx.fillStyle = vgrad([[0, '#03130b'], [0.6, '#0a2e1c'], [1, '#134a2a']]);
-  ctx.fillRect(0, 0, W, H);
-  // god rays
-  ctx.save(); ctx.globalAlpha = 0.10;
-  const rg = ctx.createLinearGradient(0, 0, W, H);
-  rg.addColorStop(0, '#ffe9a0'); rg.addColorStop(1, 'transparent');
-  ctx.fillStyle = rg;
+  // god-ray shafts
   for (let i = 0; i < 4; i++) {
-    const x = W * (0.15 + i * 0.22) + Math.sin(t * 0.2 + i) * 20;
-    ctx.beginPath();
-    ctx.moveTo(x, 0); ctx.lineTo(x + 90, 0); ctx.lineTo(x + 220, H); ctx.lineTo(x + 60, H);
-    ctx.closePath(); ctx.fill();
+    const shaft = new THREE.Mesh(new THREE.PlaneGeometry(7, 70),
+      MAT(0xffe9a0, { transparent: true, opacity: 0.06, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    shaft.position.set(-30 + i * 20, 30, -10 - i * 6);
+    shaft.rotation.z = 0.22;
+    g.add(shaft);
   }
-  ctx.restore();
-  canopyTrees(H * 0.72, '#0a2417', 401, 22, 200, 420);
-  canopyTrees(H * 0.9, '#06170f', 402, 30, 160, 340);
-  pines(H * 1.0, '#030c07', 403, 30, 200, 420);
-  // mist bands
-  ctx.fillStyle = 'rgba(200,230,200,0.05)';
-  for (let i = 0; i < 3; i++) {
-    const my = H * (0.55 + i * 0.14) + Math.sin(t * 0.3 + i * 2) * 12;
-    ctx.fillRect(0, my, W, 46);
-  }
-  drift(fireflies, t, (q) => {
-    q.x = (q.base * W * 1.2 + t * 10 * q.sp) % (W + 80) - 40;
-    q.y = H * (0.4 + 0.4 * Math.sin(t * q.sp * 0.7 + q.ph)) + Math.sin(t * 2 + q.ph) * 16;
-    q.a = 0.2 + 0.6 * Math.abs(Math.sin(t * 1.4 + q.ph));
-  });
-  drawDots(fireflies, '#d8ffb0', 1.7, 9);
-};
+  const flies = makePoints(110, 0xd8ffb0, 1.7, [130, 30, 90], 42, 0.9);
+  g.add(flies);
+  animated.push({ pts: flies, mode: 'float' });
+  // the golden deer — a small glowing shape darting between trees
+  const deer = glowSprite(0xffd76a, 7, 0, 5, 0, 0.95);
+  g.add(deer);
+  animated.push({ deer });
+  g.add(charSprite('sita', -12, 8, 16, 12));
+  g.add(charSprite('hanuman', 12, 8, 14, 12));
+  g.add(groundDisc(0x0a2014));
+  dioramas.push(g);
+}
 
-scenes.kishkindha = (p, t) => {
-  ctx.fillStyle = vgrad([[0, '#0a1c28'], [0.55, '#274b5e'], [0.85, '#6fa0a8'], [1, '#a8c8c0']]);
-  ctx.fillRect(0, 0, W, H);
-  ridge(H * 0.7, 'rgba(30,60,75,0.9)', 501, 0.5, 140, 380);
-  ridge(H * 0.85, 'rgba(18,38,50,0.95)', 502, 0.4, 100, 260);
-  // waterfall streak
-  const wx = W * (0.3 + 0.04 * Math.sin(t * 0.2));
-  const wg = ctx.createLinearGradient(0, H * 0.3, 0, H * 0.85);
-  wg.addColorStop(0, 'rgba(230,245,245,0.0)');
-  wg.addColorStop(0.5, 'rgba(230,245,245,0.5)');
-  wg.addColorStop(1, 'rgba(230,245,245,0.1)');
-  ctx.fillStyle = wg;
-  ctx.fillRect(wx - 9, H * 0.3, 18, H * 0.55);
-  ridge(H * 1.0, '#0a1820', 503, 0.3, 60, 180);
-  birds(9, t, 'rgba(15,30,40,0.85)', 504);
-  ctx.fillStyle = 'rgba(220,235,235,0.07)';
-  for (let i = 0; i < 3; i++) {
-    const my = H * (0.5 + i * 0.13) + Math.sin(t * 0.25 + i * 2.4) * 14;
-    ctx.fillRect(0, my, W, 40);
+/* 4 — KISHKINDHA: mountains in the mist */
+{
+  const g = new THREE.Group();
+  const r = mulberry32(51);
+  for (let i = 0; i < 12; i++) {
+    const h = 26 + r() * 44;
+    const mtn = cone(16 + r() * 14, h, i % 2 ? 0x1e3c4c : 0x2a4c5e, -70 + r() * 140, h / 2, -46 - r() * 30, 7);
+    g.add(mtn);
+    const cap = cone(4 + r() * 3, 8, 0xdfeaf0, mtn.position.x, h - 4, mtn.position.z, 7);
+    g.add(cap);
   }
-};
+  // waterfall
+  const fall = new THREE.Mesh(new THREE.PlaneGeometry(4, 44),
+    MAT(0xdff2f2, { transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  fall.position.set(8, 24, -40);
+  g.add(fall);
+  animated.push({ fall });
+  for (let i = 0; i < 3; i++) {
+    const mist = new THREE.Mesh(new THREE.PlaneGeometry(220, 16),
+      MAT(0xcfe0e0, { transparent: true, opacity: 0.10, depthWrite: false, side: THREE.DoubleSide }));
+    mist.position.set(0, 14 + i * 12, 6 - i * 14);
+    g.add(mist);
+    animated.push({ mist, i });
+  }
+  const birds = makePoints(40, 0x101c28, 1.4, [160, 60, 40], 52, 0.9);
+  birds.position.set(0, 40, 10);
+  g.add(birds);
+  animated.push({ pts: birds, mode: 'float' });
+  g.add(charSprite('hanuman', -10, 9, 16, 13));
+  g.add(charSprite('rama', 10, 8, 18, 12));
+  g.add(groundDisc(0x12242e));
+  dioramas.push(g);
+}
 
-scenes.sundara = (p, t) => {
-  ctx.fillStyle = vgrad([[0, '#020610'], [0.55, '#0a2342'], [0.8, '#123a63'], [1, '#0a1c34']]);
-  ctx.fillRect(0, 0, W, H);
-  stars(8, 160, t, 0.7);
-  moon(W * 0.68, H * 0.2, 58);
+/* 5 — SUNDARA: the night crossing */
+{
+  const g = new THREE.Group();
+  const stars = makePoints(400, 0xbfd0ff, 1.6, [400, 150, 60], 61, 0.8);
+  stars.position.set(0, 50, -60);
+  g.add(stars);
+  animated.push({ pts: stars, mode: 'float' });
+  g.add(glowSprite(0xf2eeda, 70, 30, 74, -108, 0.95));
+  g.add(ball(11, 0xf2eeda, 30, 74, -108));
   // moon path on the sea
-  const mg = ctx.createLinearGradient(0, H * 0.66, 0, H);
-  mg.addColorStop(0, 'rgba(240,238,220,0.30)');
-  mg.addColorStop(1, 'rgba(240,238,220,0.02)');
-  ctx.fillStyle = mg;
-  ctx.beginPath();
-  ctx.moveTo(W * 0.6, H * 0.66); ctx.lineTo(W * 0.76, H * 0.66);
-  ctx.lineTo(W * 0.84, H); ctx.lineTo(W * 0.52, H);
-  ctx.closePath(); ctx.fill();
-  sea(H * 0.66, '#0e2c52', '#030a18', t, 8);
-  // Lanka on the horizon, burning
-  lankaTowers(W * 0.24, H * 0.68, 0.8, '#050914', 601);
-  const fl = ctx.createRadialGradient(W * 0.24, H * 0.6, 6, W * 0.24, H * 0.6, 260);
-  fl.addColorStop(0, 'rgba(255,140,50,0.5)');
-  fl.addColorStop(1, 'rgba(255,80,30,0)');
-  ctx.fillStyle = fl;
-  ctx.fillRect(W * 0.24 - 270, H * 0.6 - 270, 540, 340);
+  const sea = new THREE.Mesh(new THREE.PlaneGeometry(400, 120), MAT(0x0a2038));
+  sea.rotation.x = -Math.PI / 2;
+  sea.position.set(0, 0, 20);
+  g.add(sea);
+  const path = new THREE.Mesh(new THREE.PlaneGeometry(26, 120),
+    MAT(0xf2eeda, { transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false }));
+  path.rotation.x = -Math.PI / 2;
+  path.position.set(30, 0.4, 20);
+  g.add(path);
+  // Lanka burning on the horizon
+  const r = mulberry32(62);
+  for (let i = 0; i < 7; i++) {
+    const tx = -50 + i * 16 + (r() - 0.5) * 6, th = 14 + r() * 14;
+    g.add(box(5, th, 5, 0x05070f, tx, th / 2, -52));
+    g.add(cone(3.4, 6, 0x05070f, tx, th + 3, -52, 6));
+    g.add(glowSprite(0xff8c30, 10 + r() * 8, tx, th * 0.7, -50, 0.75));
+  }
+  const embers = makePoints(90, 0xff9040, 1.8, [120, 44, 30], 63, 0.95);
+  embers.position.set(0, 6, -46);
+  g.add(embers);
+  animated.push({ pts: embers, mode: 'rise' });
   // Hanuman's burning trail across the sky
-  ctx.save();
-  ctx.strokeStyle = 'rgba(255,150,60,0.75)';
-  ctx.lineWidth = 5; ctx.lineCap = 'round';
-  ctx.shadowColor = '#ff9040'; ctx.shadowBlur = 18;
-  ctx.beginPath();
-  const ax0 = W * (0.05 + p * 0.1), ay0 = H * 0.55;
-  ctx.moveTo(ax0, ay0);
-  ctx.quadraticCurveTo(W * 0.42, H * 0.05, W * (0.72 - p * 0.08), H * 0.34);
-  ctx.stroke();
-  ctx.restore();
-  drift(embers, t, (q) => {
-    q.y -= q.vy * 0.014; q.x += Math.sin(t * 2 + q.sway) * 0.8;
-    if (q.y < H * 0.25) { q.y = H * 0.66; q.x = W * (0.1 + q.base * 0.35); }
-  });
-  drawDots(embers, '#ffb060', 1.5, 10);
-};
-
-scenes.yuddha = (p, t) => {
-  ctx.fillStyle = vgrad([[0, '#1a0505'], [0.5, '#6e1a10'], [0.78, '#c33d1e'], [1, '#ff7a2a']]);
-  ctx.fillRect(0, 0, W, H);
-  sun(W * 0.5, H * (0.66 - p * 0.06), 66, '#ffe0a8', 'rgba(255,110,40,0.55)');
-  sea(H * 0.7, 'rgba(160,50,30,0.6)', 'rgba(30,8,8,0.95)', t, 9);
-  // Rama Setu — arc of stones across the sea
-  ctx.fillStyle = '#2a1210';
-  const r = mulberry32(701);
+  const arcPts = [];
   for (let i = 0; i <= 40; i++) {
-    const bx = (i / 40) * W;
-    const by = H * 0.7 - Math.sin((i / 40) * Math.PI) * H * 0.1;
-    const bs = 14 + r() * 22;
-    ctx.beginPath();
-    ctx.ellipse(bx, by + r() * 8, bs, bs * 0.55, 0, 0, 7);
-    ctx.fill();
+    const a = i / 40;
+    arcPts.push(new THREE.Vector3(lerp(-70, 40, a), 44 - Math.sin(a * Math.PI) * -26 - a * 10, -30));
   }
-  // banner poles on the near shore
-  ctx.fillStyle = '#160606';
-  const br = mulberry32(702);
-  for (let i = 0; i < 8; i++) {
-    const px = br() * W, ph = 120 + br() * 120;
-    ctx.fillRect(px, H - ph, 7, ph);
-    ctx.beginPath();
-    ctx.moveTo(px + 7, H - ph); ctx.lineTo(px + 66, H - ph + 20); ctx.lineTo(px + 7, H - ph + 44);
-    ctx.closePath(); ctx.fill();
-  }
-  drift(embers, t, (q) => {
-    q.y -= q.vy * 0.02; q.x += Math.sin(t * 2.4 + q.sway) * 1;
-    if (q.y < 0) { q.y = H; q.x = q.base * W; }
-    q.a = 0.35 + 0.5 * Math.abs(Math.sin(t * 3 + q.sway));
-  });
-  drawDots(embers, '#ff8a3c', 1.8, 12);
-};
+  const arc = new THREE.Line(new THREE.BufferGeometry().setFromPoints(arcPts),
+    new THREE.LineBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending }));
+  g.add(arc);
+  animated.push({ arc });
+  g.add(charSprite('hanuman', -14, 10, 12, 13));
+  g.add(charSprite('sita', 2, 9, 16, 12));
+  g.add(charSprite('ravana', 16, 10, 10, 13));
+  dioramas.push(g);
+}
 
-scenes.uttara = (p, t) => {
-  ctx.fillStyle = vgrad([[0, '#0e2a4a'], [0.5, '#4a86b0'], [0.78, '#ffd9a0'], [1, '#ffe9b8']]);
-  ctx.fillRect(0, 0, W, H);
-  sun(W * 0.5, lerp(H * 0.6, H * 0.34, p), 50, '#fff6dc', 'rgba(255,210,130,0.5)');
-  ridge(H * 0.8, 'rgba(70,110,140,0.7)', 801, 0.3, 40, 140);
-  palace(W * 0.5, H * 0.9, 1.35, 'rgba(35,55,85,0.95)');
-  sea(H * 0.9, 'rgba(150,190,220,0.5)', 'rgba(25,60,95,0.9)', t, 5);
-  birds(6, t, 'rgba(40,60,90,0.8)', 802);
-  drift(diyas, t, (q) => {
-    q.x = (q.base * W * 1.2 + t * 7) % (W + 60) - 30;
-    q.y = H * (0.9 + 0.05 * Math.sin(t * 0.9 + q.ph));
-    q.a = 0.5 + 0.4 * Math.abs(Math.sin(t * 2 + q.ph));
-  });
-  drawDots(diyas, '#ffe2a8', 1.6, 12);
-  drift(petals, t, (q) => {
-    q.y -= q.vy * 0.016; q.x += Math.sin(t * 1.4 + q.sway) * 0.9;
-    if (q.y < 0) { q.y = H; q.x = q.base * W; }
-  });
-  ctx.save();
-  ctx.fillStyle = '#ffc4d0';
-  for (const q of petals) {
-    ctx.globalAlpha = q.a * 0.85;
-    ctx.beginPath();
-    ctx.ellipse((q.x % (W + 40)), q.y, q.s, q.s * 0.6, q.rot + t * 0.4, 0, 7);
-    ctx.fill();
+/* 6 — YUDDHA: war at dusk */
+{
+  const g = new THREE.Group();
+  g.add(glowSprite(0xff6a2a, 130, 0, 57, -112, 0.9));
+  g.add(ball(15, 0xffe0a8, 0, 57, -112));
+  const sea = new THREE.Mesh(new THREE.PlaneGeometry(400, 130), MAT(0x4a1410));
+  sea.rotation.x = -Math.PI / 2;
+  sea.position.set(0, 0, 24);
+  g.add(sea);
+  // Rama Setu — arc of stones
+  const r = mulberry32(71);
+  for (let i = 0; i <= 30; i++) {
+    const a = i / 30;
+    const bx = lerp(-90, 90, a);
+    const bz = 24 - Math.sin(a * Math.PI) * 46;
+    const st = new THREE.Mesh(new THREE.DodecahedronGeometry(2.4 + r() * 1.6, 0), MAT(0x3a1c14));
+    st.position.set(bx, 1.6, bz);
+    st.rotation.set(r() * 3, r() * 3, r() * 3);
+    g.add(st);
   }
-  ctx.restore();
-};
-
-scenes.outro = (p, t) => {
-  ctx.fillStyle = vgrad([[0, '#3a1c00'], [0.5, '#b35a1e'], [0.78, '#ff9a3c'], [1, '#ffe9b8']]);
-  ctx.fillRect(0, 0, W, H);
-  sun(W * 0.5, H * (0.52 - p * 0.08), 88, '#fff8e0', 'rgba(255,170,70,0.6)');
-  sea(H * 0.78, 'rgba(255,170,90,0.45)', 'rgba(90,40,10,0.9)', t, 6);
-  drift(diyas, t, (q) => {
-    q.x = (q.base * W * 1.2 + t * 6) % (W + 60) - 30;
-    q.y = H * (0.78 + 0.12 * Math.sin(t * 0.8 + q.ph)) - p * H * 0.1;
-    q.a = 0.5 + 0.45 * Math.abs(Math.sin(t * 2 + q.ph));
-  });
-  drawDots(diyas, '#ffe6b0', 2, 16);
-  drift(petals, t, (q) => {
-    q.y -= q.vy * 0.02; q.x += Math.sin(t * 1.6 + q.sway);
-    if (q.y < 0) { q.y = H; q.x = q.base * W; }
-    q.a = 0.4 + 0.5 * Math.abs(Math.sin(t + q.sway));
-  });
-  ctx.save();
-  ctx.fillStyle = '#ffd9a8';
-  for (const q of petals) {
-    ctx.globalAlpha = q.a * 0.8;
-    ctx.beginPath();
-    ctx.ellipse((q.x % (W + 40)), q.y, q.s * 1.2, q.s * 0.7, q.rot + t * 0.5, 0, 7);
-    ctx.fill();
+  // war banners on the near shore
+  for (let i = 0; i < 9; i++) {
+    const bx = -64 + i * 16 + (r() - 0.5) * 6;
+    g.add(box(0.8, 22 + r() * 8, 0.8, 0x1c0a08, bx, 11, 44));
+    const ban = new THREE.Mesh(new THREE.PlaneGeometry(9, 5),
+      MAT(i % 2 ? 0xc22a1a : 0xe8a83a, { side: THREE.DoubleSide }));
+    ban.position.set(bx + 4.8, 26, 44);
+    g.add(ban);
+    animated.push({ ban, ph: r() * 9 });
   }
-  ctx.restore();
-};
+  const embers = makePoints(120, 0xff7a30, 2, [170, 50, 90], 72, 0.95);
+  g.add(embers);
+  animated.push({ pts: embers, mode: 'rise' });
+  g.add(charSprite('rama', -14, 10, 14, 14));
+  g.add(charSprite('ravana', 14, 10, 12, 14));
+  g.add(charSprite('lakshmana', 0, 8, 20, 11));
+  g.add(groundDisc(0x2a0e0c));
+  dioramas.push(g);
+}
 
-/* ---------------- driver ---------------- */
-const chapters = [...document.querySelectorAll('.chapter')].map((el) => ({
+/* 7 — UTTARA: the serene reign */
+{
+  const g = new THREE.Group();
+  g.add(glowSprite(0xffd98a, 110, 0, 57, -108, 0.85));
+  g.add(ball(12, 0xfff6dc, 0, 57, -108));
+  const pal = palaceGroup(1.6, 0x2a3c58, 81);
+  pal.position.set(0, 0, -20);
+  g.add(pal);
+  const river = new THREE.Mesh(new THREE.PlaneGeometry(400, 34), MAT(0x3a6a94, { transparent: true, opacity: 0.92 }));
+  river.rotation.x = -Math.PI / 2;
+  river.position.set(0, 0.2, 30);
+  g.add(river);
+  const diyas = makePoints(30, 0xffe2a8, 2.2, [150, 3, 26], 82, 0.95);
+  diyas.position.set(0, 1.6, 30);
+  g.add(diyas);
+  animated.push({ pts: diyas, mode: 'float' });
+  const petals = makePoints(70, 0xffc4d0, 1.8, [150, 40, 80], 83, 0.9);
+  g.add(petals);
+  animated.push({ pts: petals, mode: 'fall' });
+  const r = mulberry32(84);
+  for (let i = 0; i < 10; i++) g.add(treeGroup(-55 + r() * 110, -30 - r() * 16, 0.8 + r() * 0.5, 0x2a5a3a, 0x3a2a1a, 300 + i));
+  g.add(charSprite('rama', -8, 9, 14, 13));
+  g.add(charSprite('sita', 8, 8.5, 16, 12));
+  g.add(groundDisc(0x1c3038));
+  dioramas.push(g);
+}
+
+/* 8 — OUTRO: the eternal sunrise */
+{
+  const g = new THREE.Group();
+  g.add(glowSprite(0xffaa46, 170, 0, 60, -112, 0.95));
+  g.add(ball(20, 0xfff8e0, 0, 60, -112));
+  const sea = new THREE.Mesh(new THREE.PlaneGeometry(500, 200), MAT(0x7a3a14));
+  sea.rotation.x = -Math.PI / 2;
+  sea.position.set(0, 0, 40);
+  g.add(sea);
+  const diyas = makePoints(46, 0xffe6b0, 2.4, [200, 30, 120], 91, 0.95);
+  g.add(diyas);
+  animated.push({ pts: diyas, mode: 'rise' });
+  const petals = makePoints(80, 0xffd9a8, 2, [200, 50, 120], 92, 0.9);
+  g.add(petals);
+  animated.push({ pts: petals, mode: 'rise' });
+  dioramas.push(g);
+}
+
+dioramas.forEach((g, i) => {
+  g.position.z = -i * DZ;
+  scene.add(g);
+});
+
+/* ---------------- camera journey ----------------
+   Chapters (DOM order): 0 intro, 1 bala, 2 ayodhya, 3 aranya, 4 kishkindha,
+   5 sundara, 6 yuddha, 7 uttara, 8 roster, 9 outro.
+   Dioramas: 0 intro, 1 bala, 2 ayodhya, 3 aranya, 4 kishkindha, 5 sundara,
+   6 yuddha, 7 uttara, 8 outro. Roster reuses diorama 7. */
+const CH_DIORAMA = [0, 1, 2, 3, 4, 5, 6, 7, 7, 8];
+
+const BG_KEYS = [
+  0x04060f, // intro — night
+  0x3a2040, // bala — dawn violet
+  0x2a1430, // ayodhya — dusk purple
+  0x061a10, // aranya — deep forest
+  0x14242e, // kishkindha — mist blue
+  0x050a18, // sundara — night sea
+  0x2a0d08, // yuddha — ember dark
+  0x1c3038, // uttara — morning slate
+  0x4a2408, // outro — golden dark
+].map((c) => new THREE.Color(c));
+
+const stops = [];
+function buildStops() {
+  stops.length = 0;
+  chapters.forEach((ch, i) => {
+    const d = CH_DIORAMA[i] ?? 8;
+    const z = -d * DZ;
+    // gentle push-in across each chapter
+    stops.push({
+      p: ch.from + (ch.to - ch.from) * 0.15,
+      pos: [-6, 30, z + 86], look: [0, 12, z - 10],
+    });
+    stops.push({
+      p: ch.from + (ch.to - ch.from) * 0.85,
+      pos: [7, 20, z + 58], look: [0, 10, z - 14],
+    });
+  });
+  stops.sort((a, b) => a.p - b.p);
+}
+
+/* ---------------- chapters & HUD ---------------- */
+const chapterEls = [...document.querySelectorAll('.chapter')];
+const chapters = chapterEls.map((el) => ({
   el,
-  scene: el.dataset.scene || 'intro',
   kanda: el.dataset.kanda || '',
   age: parseFloat(el.dataset.age || '0'),
   era: el.dataset.era || '',
-  top: 0, bottom: 0,
+  from: 0, to: 1, active: false,
 }));
 
-const hudKanda = document.getElementById('hudKanda');
-const hudAge = document.getElementById('hudAge');
-const hudEra = document.getElementById('hudEra');
-const hudBar = document.getElementById('hudBar');
-
-function measure() {
-  const max = document.documentElement.scrollHeight - innerHeight;
-  for (const c of chapters) {
-    c.top = c.el.offsetTop / Math.max(max, 1);
-    c.bottom = (c.el.offsetTop + c.el.offsetHeight) / Math.max(max, 1);
-  }
+function measureChapters() {
+  const max = Math.max(1, document.documentElement.scrollHeight - innerHeight);
+  chapterEls.forEach((el, i) => {
+    chapters[i].from = clamp01(el.offsetTop / max);
+    chapters[i].to = i === chapters.length - 1 ? 1 : clamp01((el.offsetTop + el.offsetHeight) / max);
+  });
+  buildStops();
+  readScroll();
 }
-measure();
-let rszT;
-addEventListener('resize', () => { clearTimeout(rszT); rszT = setTimeout(measure, 150); });
-addEventListener('load', measure);
 
 let targetP = 0, smoothP = 0;
-let curScene = chapters[0] ? chapters[0].scene : 'intro';
-let prevScene = curScene, blend = 1;
-
-addEventListener('scroll', () => {
+function readScroll() {
   const max = document.documentElement.scrollHeight - innerHeight;
-  targetP = max > 0 ? clamp(scrollY / max, 0, 1) : 0;
-}, { passive: true });
+  targetP = max > 0 ? clamp01(scrollY / max) : 0;
+}
+addEventListener('scroll', readScroll, { passive: true });
+let resizeT = 0;
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  clearTimeout(resizeT);
+  resizeT = setTimeout(measureChapters, 150);
+});
+addEventListener('load', measureChapters);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => measureChapters());
 
 function activeChapter(p) {
   for (let i = chapters.length - 1; i >= 0; i--) {
-    if (p >= chapters[i].top - 0.001) return i;
+    if (p >= chapters[i].from - 0.001) return i;
   }
   return 0;
 }
 
-function updateHUD(p) {
-  const i = activeChapter(p);
-  const c = chapters[i];
-  const want = c.scene;
-  if (want !== curScene) { prevScene = curScene; curScene = want; blend = 0; }
+const _pos = new THREE.Vector3(), _look = new THREE.Vector3(), _c = new THREE.Color();
 
-  hudKanda.textContent = c.kanda;
-  hudEra.textContent = c.era;
+function render(p, t, dt) {
+  // camera flight
+  let i = 0;
+  while (i < stops.length - 2 && p > stops[i + 1].p) i++;
+  const A = stops[i], B = stops[i + 1];
+  const tt = sstep(A.p, B.p, p);
+  _pos.set(lerp(A.pos[0], B.pos[0], tt), lerp(A.pos[1], B.pos[1], tt), lerp(A.pos[2], B.pos[2], tt));
+  _look.set(lerp(A.look[0], B.look[0], tt), lerp(A.look[1], B.look[1], tt), lerp(A.look[2], B.look[2], tt));
+  camera.position.copy(_pos);
+  if (!reducedMotion) {
+    camera.position.x += Math.sin(t * 0.45) * 0.7;
+    camera.position.y += Math.cos(t * 0.38) * 0.5;
+  }
+  camera.lookAt(_look);
 
-  // Rama's age: interpolate between chapter ages
+  // background + fog follow the diorama under the playhead
+  const ci = activeChapter(p);
+  const d = CH_DIORAMA[ci] ?? 8;
+  _c.copy(BG_KEYS[d]);
+  scene.background.copy(_c);
+  scene.fog.color.copy(_c);
+
+  // per-diorama animation
+  for (const a of animated) {
+    if (a.pts) driftPoints(a.pts, t, dt, a.mode);
+    if (a.flame && !reducedMotion) {
+      const s = 1 + Math.sin(t * 9) * 0.12 + Math.sin(t * 23) * 0.06;
+      a.flame.scale.set(s, 1 + Math.sin(t * 11) * 0.18, s);
+    }
+    if (a.deer && !reducedMotion) {
+      const dx = Math.sin(t * 0.5) * 34;
+      a.deer.position.x = dx;
+      a.deer.position.z = -6 + Math.cos(t * 0.33) * 22;
+    }
+    if (a.fall && !reducedMotion) {
+      a.fall.material.opacity = 0.35 + Math.sin(t * 7) * 0.15;
+    }
+    if (a.mist && !reducedMotion) {
+      a.mist.position.x = Math.sin(t * 0.22 + a.i * 2.4) * 18;
+    }
+    if (a.arc && !reducedMotion) {
+      a.arc.material.opacity = 0.55 + Math.sin(t * 3) * 0.3;
+    }
+    if (a.ban && !reducedMotion) {
+      a.ban.rotation.y = Math.sin(t * 2.2 + a.ph) * 0.35;
+    }
+  }
+  if (!reducedMotion) {
+    for (const sp of charSprites) {
+      sp.position.y = sp.userData.baseY + Math.sin(t * 1.2 + sp.userData.ph) * 0.9;
+    }
+  }
+
+  // HUD
+  const c = chapters[ci];
+  if (hudKanda.textContent !== c.kanda) hudKanda.textContent = c.kanda;
+  if (hudEra.textContent !== c.era) hudEra.textContent = c.era;
   let age = c.age;
-  const n = chapters[i + 1];
+  const n = chapters[ci + 1];
   if (n && n.age !== c.age) {
-    const span = Math.max(n.top - c.top, 1e-6);
-    const f = clamp((p - c.top) / span, 0, 1);
-    age = lerp(c.age, n.age, f);
+    const span = Math.max(n.from - c.from, 1e-6);
+    age = lerp(c.age, n.age, clamp01((p - c.from) / span));
   }
   hudAge.textContent = 'Rama · age ' + Math.round(age);
-
   hudBar.style.width = (p * 100).toFixed(2) + '%';
-
-  // intra-chapter progress for the scene painter
-  const span = Math.max(c.bottom - c.top, 1e-6);
-  return clamp((p - c.top) / span, 0, 1);
-}
-
-let lastT = performance.now();
-function frame(now) {
-  const dt = Math.min((now - lastT) / 1000, 0.05);
-  lastT = now;
-  const t = reduced ? 0 : now / 1000;
-
-  // damped playhead
-  const k = 1 - Math.exp(-5.5 * dt);
-  smoothP += (targetP - smoothP) * k;
-  if (Math.abs(targetP - smoothP) < 0.0004) smoothP = targetP;
-
-  const p = updateHUD(smoothP);
-
-  // crossfade scenes
-  if (blend < 1) blend = Math.min(1, blend + dt * 1.6);
-
-  const paint = scenes[curScene] || scenes.intro;
-  if (blend < 1 && scenes[prevScene]) {
-    ctx.save();
-    scenes[prevScene](p, t);
-    ctx.restore();
-    ctx.save();
-    ctx.globalAlpha = blend;
-    paint(p, t);
-    ctx.restore();
-  } else {
-    paint(p, t);
+  for (let k = 0; k < chapters.length; k++) {
+    const on = k === ci;
+    if (on !== chapters[k].active) {
+      chapters[k].active = on;
+      chapters[k].el.classList.toggle('is-active', on);
+    }
   }
 
-  requestAnimationFrame(frame);
+  renderer.render(scene, camera);
 }
-requestAnimationFrame(frame);
-})();
+
+/* ---------------- main loop ---------------- */
+let fpsEma = 60, lastQuality = 0;
+const clock = new THREE.Clock();
+function frame() {
+  requestAnimationFrame(frame);
+  const dt = Math.min(clock.getDelta(), 0.1);
+  const t = clock.elapsedTime;
+  if (dt > 0) fpsEma += (1 / dt - fpsEma) * 0.05;
+  const now = performance.now() / 1000;
+  if (now - lastQuality > 2.5) {
+    lastQuality = now;
+    if (fpsEma < 34 && pixelRatio > 1) {
+      pixelRatio = Math.max(1, pixelRatio - 0.25);
+      renderer.setPixelRatio(pixelRatio);
+    } else if (fpsEma > 57 && pixelRatio < PR_CAP) {
+      pixelRatio = Math.min(PR_CAP, pixelRatio + 0.25);
+      renderer.setPixelRatio(pixelRatio);
+    }
+  }
+  const k = 1 - Math.exp(-dt * 5.5);
+  smoothP += (targetP - smoothP) * k;
+  if (Math.abs(targetP - smoothP) < 0.0004) smoothP = targetP;
+  render(smoothP, reducedMotion ? 0 : t, reducedMotion ? 0 : dt);
+}
+
+measureChapters();
+readScroll();
+if (reducedMotion) {
+  const syncStatic = () => { readScroll(); render(targetP, 0, 0); };
+  addEventListener('scroll', syncStatic, { passive: true });
+  syncStatic();
+} else {
+  frame();
+}

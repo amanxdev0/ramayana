@@ -1,13 +1,15 @@
 # RAMAYANA — a scroll-driven epic
 
-A scroll-driven journey through the **Valmiki Ramayana**: all 7 Kandas,
+A scroll-driven **3D** journey through the **Valmiki Ramayana** (Three.js, HELIOS-style): all 7 Kandas,
 every great event, with **Rama's age and the years of exile advancing in the
 HUD as you scroll** — from his birth in Ayodhya to the very end.
 
-Real HTML chapters float over a living painted film: nine hand-painted
-animated canvas scenes (Ayodhya's moonlit skyline, the forest of Dandaka,
-Hanuman's burning trail over the sea, the Rama Setu at war-dusk, and more),
-crossfading as the story moves.
+Real HTML chapters float over a living 3D film: nine staged dioramas
+(moonlit Ayodhya, the yajna at dawn, the deep forest, misty Kishkindha,
+the night crossing to Lanka, the battlefield, the serene reign…) that the
+camera flies through as you scroll — with drifting fireflies, rising
+embers, falling petals, and the five pixel-art characters as billboards
+in the scenes where they belong.
 
 ## The journey
 
